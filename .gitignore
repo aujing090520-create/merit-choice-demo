@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.playwright-cli/
+output/
+*.log
+
+# Local review exports retained outside source control.
+*.png
+!public/**/*.png
