@@ -7,3 +7,4 @@ output/
 # Local review exports retained outside source control.
 *.png
 !public/**/*.png
+.vercel
