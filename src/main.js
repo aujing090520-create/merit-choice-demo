@@ -18,6 +18,7 @@ const state = {
   tools: false,
   gameSheet: false,
   eligible: true,
+  featureEnabled: true,
   invited: false,
   invitationState: 'idle',
   phase: 'invite',
@@ -27,8 +28,10 @@ const state = {
   roundAnswers: [],
   summaryPosted: false,
   sessionEnd: null,
+  exceptionState: null,
   review: false,
-  selectedRule: null
+  selectedRule: null,
+  localClosed: { self: false, companion: false }
 };
 
 const rules = [
@@ -66,7 +69,8 @@ const current = (index = state.selfQuestion) => batches[state.batch][index];
 const marker = (id) => state.review ? `<span class="marker" data-rule="${id}" role="button" tabindex="0" aria-label="${id} 的规则标记">${id.slice(-1)}</span>` : '';
 
 function resetRound() {
-  state.phase = 'invite'; state.selfQuestion = 0; state.otherQuestion = 0; state.roundAnswers = []; state.summaryPosted = false; state.sessionEnd = null;
+  state.phase = 'invite'; state.selfQuestion = 0; state.otherQuestion = 0; state.roundAnswers = []; state.summaryPosted = false; state.sessionEnd = null; state.exceptionState = null;
+  state.localClosed = { self: false, companion: false };
 }
 
 function roundComplete() {
@@ -117,10 +121,12 @@ function setDemoState(view) {
   state.tools = false; state.gameSheet = false; state.invited = true; state.summaryPosted = false;
   state.phase = 'question'; state.invitationState = 'accepted'; state.selfQuestion = 0; state.otherQuestion = 0;
   state.roundAnswers = []; state.sessionEnd = null;
+  state.exceptionState = null;
   if (view === 'invite') { state.phase = 'invite'; state.invitationState = 'waiting'; return; }
   if (view === 'ready') { state.phase = 'invite'; state.invitationState = 'ready'; return; }
   if (view === 'expired') { state.phase = 'invite'; state.invitationState = 'expired'; return; }
   if (view === 'ended') { state.sessionEnd = 'ended'; return; }
+  if (view.startsWith('exception-')) { state.exceptionState = view.replace('exception-', ''); return; }
   if (view === 'reveal') {
     state.roundAnswers = [{ id: questions[0].id, q: questions[0].q, self: 'a', other: 'b' }];
     return;
@@ -164,13 +170,13 @@ function renderChat() {
       <div class="toolbar"><button class="asset-button tools-toggle ${state.tools ? 'is-open' : ''}" data-action="tools" aria-label="更多功能">${state.tools ? `<span class="toolbar-close">${chatIcon('close')}</span>` : `<img src="${htAsset}composer_plus.png" alt="更多"/>`}</button><button class="asset-button" aria-label="照片"><img src="${htAsset}composer_photo.png" alt="照片"/></button><button class="asset-button" aria-label="表情"><img src="${htAsset}composer_emoji.png" alt="表情"/></button><button class="asset-button" aria-label="安全">${chatIcon('shield')}</button><button class="asset-button" aria-label="更多">${chatIcon('more')}</button></div>
       ${state.tools ? renderTools() : ''}
     </footer>
-    ${state.page === 'game' ? renderPlaySheet('self') : state.gameSheet ? renderGameSheet() : ''}
+    ${state.page === 'game' && !state.localClosed.self ? renderPlaySheet('self') : state.gameSheet ? renderGameSheet() : ''}
   </div>`;
 }
 
 function renderTools() {
   const tile = (file, label, action = '', rule = '') => `<button class="tool-tile ${label === '小游戏' ? 'featured' : ''}" ${action ? `data-action="${action}"` : ''} ${rule ? `data-rule="${rule}"` : ''}>${file ? `<img src="${htAsset}${file}" alt=""/>` : `<i>${chatIcon('study')}</i>`}<span>${label}</span>${rule ? marker(rule) : ''}</button>`;
-  const gameTile = state.eligible ? tile('tool_game.png', '小游戏', 'open-game', 'FR-MQ-001') : '';
+  const gameTile = state.featureEnabled && state.eligible ? tile('tool_game.png', '小游戏', 'open-game', 'FR-MQ-001') : '';
   return `<section class="tools-panel">${tile('tool_voice.png', '语音通话')}${tile('tool_bookmark.png', '收藏')}${tile('', '付费陪练')}${tile('tool_calendar.png', '学习计划')}${tile('tool_draw.png', '涂鸦')}${tile('tool_intro.png', '介绍好友')}${tile('tool_location.png', '位置')}${gameTile}</section>`;
 }
 
@@ -190,10 +196,19 @@ function renderPlaySheet(owner) {
   const otherPortrait = isCompanion ? 'avatar-mia.png' : 'avatar-yuki.png';
   const people = `<div class="people"><img class="avatar avatar-self" src="${htAsset}${selfPortrait}" alt="你"/><div class="orbit">✦</div><img class="avatar avatar-other" src="${htAsset}${otherPortrait}" alt="Mía"/></div>`;
   let body = '';
-  if (state.sessionEnd === 'ended') {
+  const exceptionCopy = {
+    blocked: ['暂时无法继续', '你们暂时无法进行这局游戏。先回聊天看看吧。', '回到聊天'],
+    reported: ['暂时无法继续', '这局游戏已被结束，先回聊天看看吧。', '回到聊天'],
+    risk: ['暂时无法继续', '当前状态下无法继续这局游戏。', '回到聊天'],
+    withdrawn: ['邀请已撤回', '这次邀请已经被撤回，先回聊天看看吧。', '回到聊天'],
+    unavailable: ['会话不可用', '当前聊天已不可用，先回聊天看看吧。', '回到聊天']
+  }[state.exceptionState];
+  if (exceptionCopy) {
+    body = `<div class="play-finish concise-finish end-state"><div class="result-burst">!</div><h2>${exceptionCopy[0]}</h2><p>${exceptionCopy[1]}</p><button class="primary" data-action="back-chat">${exceptionCopy[2]}</button></div>`;
+  } else if (state.sessionEnd === 'ended') {
     body = `<div class="play-finish concise-finish end-state"><div class="result-burst">⌁</div><h2>本局已结束</h2><p>对方已退出本局。</p><button class="primary" data-action="back-chat">回到聊天</button></div>`;
   } else if (state.invitationState === 'expired') {
-    body = `<div class="play-finish concise-finish end-state"><div class="result-burst">◷</div><h2>邀请已失效</h2><p>本次邀请已结束，暂时无法开始。</p><button class="primary" data-action="back-chat">知道了</button></div>`;
+    body = `<div class="play-finish concise-finish end-state"><div class="result-burst">◷</div><h2>邀请已失效</h2><p>这次邀请没有等到回应，先回聊天看看吧。</p><button class="primary" data-action="back-chat">回到聊天</button></div>`;
   } else if (state.phase === 'invite') {
     if (state.invitationState === 'waiting') {
       body = `<div class="play-wait">${people}<h2>等待 Mía 的回应</h2><p>双方都同意后才会开始。</p><div class="waiting-card"><span>${icon('clock')}</span> 对方还没有确认</div><button class="quiet" data-action="back-chat">先不玩</button></div>`;
@@ -210,7 +225,8 @@ function renderPlaySheet(owner) {
     const theirs = isCompanion ? highlight.self : highlight.other;
     const partner = isCompanion ? '对方' : 'Mía';
     const outcome = highlight.different ? `你选了「${mine}」，${partner} 选了「${theirs}」` : `你们都选了「${mine}」`;
-    body = `<div class="play-finish social-finish concise-finish"><h2>想听听你为什么选这个</h2><p class="finish-outcome">${outcome}</p><section class="finish-prompt"><i>“</i><p>${highlight.prompt}</p></section><button class="primary" data-action="return-to-chat">回到聊天聊聊</button></div>`;
+    const discovery = highlight.different ? '原来你们会这样想' : `原来你们都选了「${mine}」`;
+    body = `<div class="play-finish social-finish concise-finish"><p class="finish-eyebrow">这一轮的小发现</p><h2>${discovery}</h2><section class="finish-prompt"><i>“</i><p>${highlight.prompt}</p></section><button class="primary" data-action="return-to-chat">回到聊天</button></div>`;
   } else {
     const q = current(index);
     const answer = answerFor(index);
@@ -238,7 +254,7 @@ function renderPlaySheet(owner) {
     }
   }
   const subtitle = state.sessionEnd === 'ended' ? '本局已结束' : state.invitationState === 'expired' ? '邀请已失效' : state.phase === 'invite' ? '一起选，自动揭晓' : index >= 3 ? `${title} 已完成这一轮` : `${title} 正在作答`;
-  return `<div class="play-backdrop"><section class="play-sheet" aria-label="默契二选一"><i class="play-grab" aria-hidden="true"></i><header><button data-action="exit" aria-label="关闭">${icon('close')}</button><div><b>默契二选一</b><small>${subtitle}</small></div><span></span></header>${body}</section></div>`;
+  return `<div class="play-backdrop"><section class="play-sheet" aria-label="默契二选一"><i class="play-grab" aria-hidden="true"></i><header><button data-action="close-local" data-owner="${owner}" aria-label="关闭">${icon('close')}</button><div><b>默契二选一</b><small>${subtitle}</small></div><span></span></header>${body}</section></div>`;
 }
 
 function renderInvite() {
@@ -301,7 +317,7 @@ function renderCompanionPhone() {
     <main class="messages"><div class="message-time">今天 20:16</div><div class="message-row theirs"><img class="chat-avatar" src="${htAsset}avatar-mia.png" alt="你"/><div class="bubble other">That’s great! You did it.</div></div><div class="message-row mine"><div class="bubble self">I finally finished my presentation! 🎉</div><img class="chat-avatar" src="${htAsset}avatar-yuki.png" alt="Mía"/></div>${card}${renderSummaryCard(true)}</main>
     <footer class="chat-composer"><div class="input-line"><input class="chat-input" aria-label="Message" placeholder="输入消息…"/><button class="asset-button" aria-label="语音"><img src="${htAsset}composer_mic.png" alt="语音"/></button></div><div class="toolbar"><button class="asset-button" aria-label="更多"><img src="${htAsset}composer_plus.png" alt="更多"/></button><button class="asset-button" aria-label="照片"><img src="${htAsset}composer_photo.png" alt="照片"/></button><button class="asset-button" aria-label="表情"><img src="${htAsset}composer_emoji.png" alt="表情"/></button><button class="asset-button" aria-label="安全">${chatIcon('shield')}</button><button class="asset-button" aria-label="更多">${chatIcon('more')}</button></div></footer>
   </div>`;
-  return `<section class="phone-shell companion-phone"><div class="status"><span>9:41</span><span>●●● ᴡɪꜰɪ ▰</span></div>${chat}${state.page === 'game' && (state.sessionEnd || state.invitationState === 'expired' || state.phase !== 'invite' || state.invitationState === 'ready') ? renderPlaySheet('companion') : ''}</section>`;
+  return `<section class="phone-shell companion-phone"><div class="status"><span>9:41</span><span>●●● ᴡɪꜰɪ ▰</span></div>${chat}${!state.localClosed.companion && state.page === 'game' && (state.sessionEnd || state.invitationState === 'expired' || state.phase !== 'invite' || state.invitationState === 'ready') ? renderPlaySheet('companion') : ''}</section>`;
 }
 
 function renderCompanionQuestion() {
@@ -312,12 +328,12 @@ function renderCompanionQuestion() {
 
 function renderControls() {
   return `<aside class="control-panel"><div class="control-heading"><span>Demo 控制台</span><small>不属于 App 画面</small></div>
-    <label class="toggle-row"><span>双方均 18 岁及以上</span><input type="checkbox" data-control="eligible" ${state.eligible ? 'checked' : ''}/><i></i></label>
+    <label class="toggle-row"><span>默契二选一功能可见</span><input type="checkbox" data-control="feature" ${state.featureEnabled ? 'checked' : ''}/><i></i></label>
     <div class="control-block"><b>对方操作</b><p>${state.page === 'chat' ? '从聊天工具打开“默契二选一”后可模拟。' : state.phase === 'invite' && state.invitationState === 'waiting' ? '等待邀请回应。' : state.phase === 'question' ? '对方可完成本题选择。' : '当前无需对方操作。'}</p>
       ${state.page !== 'chat' && state.phase === 'invite' && state.invitationState === 'waiting' ? `<button data-control="accept">Mía 同意开始</button><button class="subtle" data-control="decline">Mía 暂不加入</button>` : ''}
       ${state.page !== 'chat' && state.phase === 'question' && state.self && !state.other ? `<button data-control="other-a">Mía 选 A</button><button data-control="other-b">Mía 选 B</button>` : ''}
     </div>
-    <div class="control-block scenario-block"><b>快捷状态</b><p>直接查看关键界面，不影响 App 画面。</p><div class="scenario-grid"><button data-control="state-invite">邀请已发出</button><button data-control="state-ready">接收方待开始</button><button data-control="state-reveal">第 1 题揭晓</button><button data-control="state-finish">结束页·答案不同</button><button data-control="state-finish-same-a">结束页·同选 A</button><button data-control="state-finish-same-b">结束页·同选 B</button><button data-control="state-expired">邀请已失效</button><button data-control="state-ended">中途退出</button><button data-control="state-chat-result">聊天结果卡</button></div></div>
+    <div class="control-block scenario-block"><b>快捷状态</b><p>直接查看关键界面，不影响 App 画面。</p><div class="scenario-grid"><button data-control="state-invite">邀请已发出</button><button data-control="state-ready">接收方待开始</button><button data-control="state-reveal">第 1 题揭晓</button><button data-control="state-finish">结束页·答案不同</button><button data-control="state-finish-same-a">结束页·同选 A</button><button data-control="state-finish-same-b">结束页·同选 B</button><button data-control="state-expired">邀请已失效</button><button data-control="state-ended">中途退出</button><button data-control="state-chat-result">聊天结果卡</button><button data-control="state-exception-blocked">拉黑收口</button><button data-control="state-exception-reported">举报收口</button><button data-control="state-exception-risk">风控收口</button><button data-control="state-exception-withdrawn">邀请撤回</button><button data-control="state-exception-unavailable">会话不可用</button></div></div>
     <label class="toggle-row"><span>Review 映射</span><input type="checkbox" data-control="review" ${state.review ? 'checked' : ''}/><i></i></label>
     <button class="reset" data-control="reset">重置演示</button>
   </aside>`;
@@ -373,21 +389,34 @@ function handleAction(action, value) {
 app.addEventListener('click', (event) => {
   const reviewMarker = event.target.closest('.marker[data-rule]');
   if (reviewMarker && state.review) { state.selectedRule = reviewMarker.dataset.rule; render(); return; }
-  const action = event.target.closest('[data-action]'); if (action) return handleAction(action.dataset.action, action.dataset.value);
+  const action = event.target.closest('[data-action]'); if (action) {
+    if (action.dataset.action === 'close-local') {
+      const owner = action.dataset.owner || 'self';
+      state.localClosed[owner] = true;
+      if (owner === 'self' && state.phase === 'question') {
+        state.sessionEnd = 'ended';
+        state.page = 'chat';
+      }
+      render();
+      return;
+    }
+    return handleAction(action.dataset.action, action.dataset.value);
+  }
   const rule = event.target.closest('[data-rule]'); if (rule && state.review) { state.selectedRule = rule.dataset.rule; render(); return; }
   const control = event.target.closest('[data-control]'); if (!control) return;
   const type = control.dataset.control;
-  if (type === 'eligible' || type === 'review') return;
+  if (type === 'feature' || type === 'eligible' || type === 'review') return;
   if (type === 'accept') state.invitationState = 'ready';
   if (type === 'decline') { state.invitationState = 'declined'; state.page = 'chat'; state.tools = false; }
   if (type === 'other-a' || type === 'other-b') { const answer = answerFor(state.otherQuestion); if (!answer.other) answer.other = type.endsWith('a') ? 'a' : 'b'; }
   if (type.startsWith('state-')) setDemoState(type.replace('state-', ''));
-  if (type === 'reset') { Object.assign(state, { page: 'chat', tools: false, gameSheet: false, eligible: true, invited: false, invitationState: 'idle', batch: 0, review: false, selectedRule: null, sessionEnd: null }); resetRound(); }
+  if (type === 'reset') { Object.assign(state, { page: 'chat', tools: false, gameSheet: false, eligible: true, featureEnabled: true, invited: false, invitationState: 'idle', batch: 0, review: false, selectedRule: null, sessionEnd: null, exceptionState: null }); resetRound(); }
   render();
 });
 
 app.addEventListener('change', (event) => {
   if (event.target.dataset.control === 'eligible') { state.eligible = event.target.checked; if (!state.eligible) { state.page = 'chat'; state.tools = false; resetRound(); } }
+  if (event.target.dataset.control === 'feature') { state.featureEnabled = event.target.checked; state.tools = false; }
   if (event.target.dataset.control === 'review') state.review = event.target.checked;
   render();
 });
