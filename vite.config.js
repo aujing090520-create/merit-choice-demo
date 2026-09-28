@@ -1,6 +1,7 @@
 import { defineConfig, searchForWorkspaceRoot } from 'vite';
 
 export default defineConfig({
+  base: process.env.GITHUB_ACTIONS ? '/merit-choice-demo/' : '/',
   server: {
     fs: {
       allow: [
